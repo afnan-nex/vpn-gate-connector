@@ -24,7 +24,7 @@ from tkinter import ttk, scrolledtext, messagebox
 
 # System tray
 import pystray
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 # --- Windows-only check ---
 if os.name != "nt":
@@ -59,6 +59,42 @@ class VPNServer:
     ovpn_b64: str
 
 
+def create_tray_icon_image():
+    """Create a proper icon image for the system tray."""
+    width = 64
+    height = 64
+    # Create with transparency support
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    dc = ImageDraw.Draw(image)
+
+    # Draw a nice shield shape
+    # Main shield body
+    dc.ellipse([4, 4, 60, 60], fill=(37, 99, 235, 255), outline=(30, 64, 175, 255), width=3)
+    # Inner highlight
+    dc.ellipse([10, 10, 54, 54], outline=(96, 165, 250, 180), width=2)
+
+    # Draw "VPN" text - try to use a font, fallback to default
+    try:
+        font = ImageFont.truetype("segoeui.ttf", 14)
+    except Exception:
+        try:
+            font = ImageFont.truetype("arial.ttf", 14)
+        except Exception:
+            font = ImageFont.load_default()
+
+    # Center the text
+    text = "VPN"
+    bbox = dc.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    x = (width - text_width) // 2
+    y = (height - text_height) // 2 - 2
+
+    dc.text((x, y), text, fill="white", font=font)
+
+    return image
+
+
 class VPNGateApp:
     def __init__(self, root):
         self.root = root
@@ -74,7 +110,8 @@ class VPNGateApp:
         self.is_connected = False
         self.is_connecting = False
         self.tray_icon = None
-        self.tray_thread = None
+        self.tray_icon_image = create_tray_icon_image()
+        self.tray_visible = False
         self.log_lines: list[str] = []
         self.max_log_lines = 500
 
@@ -86,7 +123,6 @@ class VPNGateApp:
         self.openvpn_bin = self.find_openvpn()
 
         self.build_ui()
-        self.create_tray_icon()
 
         # Start background fetch
         self.fetch_servers_async()
@@ -192,49 +228,70 @@ class VPNGateApp:
 
     # ===================== SYSTEM TRAY =====================
 
-    def create_tray_icon(self):
-        # Create a simple icon image
-        icon_image = self._create_icon_image()
-
+    def setup_tray_icon(self):
+        """Create and return the pystray icon object."""
         menu = pystray.Menu(
-            pystray.MenuItem("Show", self.show_window),
+            pystray.MenuItem("Show Window", self.show_from_tray),
             pystray.MenuItem("Connect", self.on_connect),
             pystray.MenuItem("Disconnect", self.on_disconnect),
-            pystray.MenuItem("Terminate", self.on_terminate),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Exit", self.on_terminate),
+            pystray.MenuItem("Terminate & Exit", self.on_terminate),
         )
 
-        self.tray_icon = pystray.Icon(APP_NAME, icon_image, APP_NAME, menu)
+        title = f"{APP_NAME} - Connected" if self.is_connected else f"{APP_NAME} - Disconnected"
 
-    def _create_icon_image(self) -> Image.Image:
-        width = 64
-        height = 64
-        image = Image.new("RGB", (width, height), "white")
-        dc = ImageDraw.Draw(image)
-        # Draw a simple shield-like shape in blue
-        dc.ellipse([8, 8, 56, 56], fill="#2563EB", outline="#1E40AF", width=3)
-        dc.text((22, 22), "VPN", fill="white", font=None)
-        return image
+        icon = pystray.Icon(
+            APP_NAME,
+            self.tray_icon_image,
+            title,
+            menu
+        )
+        return icon
 
-    def run_tray(self):
-        self.tray_icon.run()
+    def show_from_tray(self):
+        """Callback from tray menu to show the window."""
+        self.root.after(0, self._show_window)
 
-    def show_window(self):
-        self.tray_icon.stop()
-        self.root.after(0, self._deiconify)
-
-    def _deiconify(self):
+    def _show_window(self):
+        """Restore window from tray."""
         self.root.deiconify()
         self.root.lift()
         self.root.focus_force()
+        self.tray_visible = False
+        # Stop the tray icon since window is now visible
+        if self.tray_icon:
+            try:
+                self.tray_icon.stop()
+            except Exception:
+                pass
+            self.tray_icon = None
 
     def on_close(self):
         """Minimize to tray instead of closing."""
         self.root.withdraw()
-        if self.tray_thread is None or not self.tray_thread.is_alive():
-            self.tray_thread = threading.Thread(target=self.run_tray, daemon=True)
-            self.tray_thread.start()
+        self.tray_visible = True
+
+        # Start tray icon in a daemon thread
+        tray_thread = threading.Thread(target=self._run_tray, daemon=True)
+        tray_thread.start()
+
+    def _run_tray(self):
+        """Run the tray icon in its own thread."""
+        try:
+            self.tray_icon = self.setup_tray_icon()
+            self.tray_icon.run()
+        except Exception as e:
+            # If tray fails, just show the window again
+            self.root.after(0, self._show_window)
+
+    def update_tray_title(self):
+        """Update tray icon tooltip if tray is active."""
+        if self.tray_icon and self.tray_visible:
+            try:
+                title = f"{APP_NAME} - Connected" if self.is_connected else f"{APP_NAME} - Disconnected"
+                self.tray_icon.title = title
+            except Exception:
+                pass
 
     # ===================== OPENVPN =====================
 
@@ -346,7 +403,7 @@ class VPNGateApp:
                         self.is_connecting = False
                         self.set_status(f"Connected: {server.hostname}")
                         self.update_buttons()
-                        self.tray_icon.title = f"{APP_NAME} - Connected"
+                        self.update_tray_title()
 
                     if "AUTH_FAILED" in line or "connection refused" in line.lower():
                         self.log("Authentication failed or connection refused.")
@@ -363,8 +420,7 @@ class VPNGateApp:
                 self.is_connecting = False
                 self.set_status("Disconnected")
                 self.update_buttons()
-                if self.tray_icon:
-                    self.tray_icon.title = f"{APP_NAME} - Disconnected"
+                self.update_tray_title()
                 self.log("\n--- Connection closed ---\n")
 
             except Exception as e:
@@ -373,6 +429,7 @@ class VPNGateApp:
                 self.is_connecting = False
                 self.set_status("Error")
                 self.update_buttons()
+                self.update_tray_title()
 
         threading.Thread(target=_connect, daemon=True).start()
         self.update_buttons()
@@ -390,15 +447,18 @@ class VPNGateApp:
         self.kill_openvpn()
         self.set_status("Disconnected")
         self.update_buttons()
-        if self.tray_icon:
-            self.tray_icon.title = f"{APP_NAME} - Disconnected"
+        self.update_tray_title()
 
     def on_terminate(self):
         """Kill everything and exit the app."""
         self.log("\n*** TERMINATING ***")
         self.on_disconnect()
+        # Stop tray icon
         if self.tray_icon:
-            self.tray_icon.stop()
+            try:
+                self.tray_icon.stop()
+            except Exception:
+                pass
         self.root.after(100, self._exit_app)
 
     def _exit_app(self):
