@@ -99,7 +99,7 @@ class VPNGateApp:
     def __init__(self, root):
         self.root = root
         self.root.title(APP_NAME)
-        self.root.geometry("900x650")
+        self.root.geometry("900x550")
         self.root.minsize(800, 550)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
