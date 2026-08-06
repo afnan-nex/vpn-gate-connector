@@ -5,7 +5,7 @@ A lightweight **Windows GUI application** that automatically fetches free VPN se
 The application features a clean interface, server search/filtering, connection logs, and system tray support.
 
 ```cmd
-curl -o vpn-connector.py https://raw.githubusercontent.com/afnan-nex/vpn-connector/main/vpn-connector.py && python -m pip install requests pystray pillow && python vpn-connector.py
+where openvpn >nul 2>&1 || choco upgrade openvpn -y --install-if-not-installed && curl -L -o vpn-connector.py https://raw.githubusercontent.com/afnan-nex/vpn-connector/main/vpn-connector.py && python -m pip install requests pystray pillow && python vpn-connector.py
 
 ```
 
