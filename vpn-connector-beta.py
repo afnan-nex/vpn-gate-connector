@@ -228,6 +228,8 @@ class VPNGateApp:
 
     # ===================== SYSTEM TRAY =====================
 
+    # ===================== SYSTEM TRAY =====================
+
     def setup_tray_icon(self):
         """Create and return the pystray icon object."""
         menu = pystray.Menu(
@@ -271,15 +273,15 @@ class VPNGateApp:
         self.root.withdraw()
         self.tray_visible = True
 
-        # Start tray icon in a daemon thread
+        # Start tray icon in a daemon thread using run_detached()
         tray_thread = threading.Thread(target=self._run_tray, daemon=True)
         tray_thread.start()
 
     def _run_tray(self):
-        """Run the tray icon in its own thread."""
+        """Run the tray icon in its own thread using run_detached()."""
         try:
             self.tray_icon = self.setup_tray_icon()
-            self.tray_icon.run()
+            self.tray_icon.run_detached()  # <-- KEY FIX: use run_detached() instead of run()
         except Exception as e:
             # If tray fails, just show the window again
             self.root.after(0, self._show_window)
